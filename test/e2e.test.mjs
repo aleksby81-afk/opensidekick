@@ -2101,7 +2101,7 @@ async function main() {
     await optPage.evaluate(([key, cfg, origin]) => {
       cfg.sitePermissions = { [origin]: "allow" };
       return chrome.storage.local.set({ [key]: cfg });
-    }, [STORAGE_KEY, { ...config, settings: { ...config.settings, autonomy: "auto", siteAccess: "allowlist" } }, new URL(BASE1).origin]);
+    }, [STORAGE_KEY, { ...config, settings: { ...config.settings, autonomy: "auto", siteAccess: "allowlist" } }, new URL(base).origin]);
     const al2 = await drive("Search for cats on this page.");
     check(al2.perms.length === 0, `allowlist: trusted site runs with zero prompts (got ${al2.perms.length})`);
 
@@ -2109,7 +2109,7 @@ async function main() {
     await optPage.evaluate(([key, cfg, origin]) => {
       cfg.sitePermissions = { [origin]: "block" };
       return chrome.storage.local.set({ [key]: cfg });
-    }, [STORAGE_KEY, { ...config, settings: { ...config.settings, autonomy: "auto", siteAccess: "allowlist" } }, new URL(BASE1).origin]);
+    }, [STORAGE_KEY, { ...config, settings: { ...config.settings, autonomy: "auto", siteAccess: "allowlist" } }, new URL(base).origin]);
     const al3 = await drive("Search for cats on this page.");
     check(al3.perms.length === 0 && al3.events.some((e) => e.kind === "tool_end" && /blocked OpenSidekick/i.test(e.summary || "")),
       "allowlist: a blocked site refuses tools without prompting");
@@ -2132,7 +2132,7 @@ async function main() {
     const ruleNow = await chipPanel.evaluate(async ([key, origin]) => {
       const raw = await chrome.storage.local.get(key);
       return ((raw[key] || {}).sitePermissions || {})[origin] || null;
-    }, [STORAGE_KEY, new URL(BASE1).origin]);
+    }, [STORAGE_KEY, new URL(base).origin]);
     check(ruleNow === "allow", `site-chip: 'Trust' persists an allow rule (got ${ruleNow})`);
     const chipText2 = await chipPanel.$eval("#context-hint", (e) => e.textContent).catch(() => "");
     check(/allowed/.test(chipText2) && !/not allowed yet/.test(chipText2), `site-chip: chip reflects the new rule (got "${chipText2}")`);
