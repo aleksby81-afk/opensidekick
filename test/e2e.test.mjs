@@ -1379,8 +1379,7 @@ async function main() {
 
     // --- Test large page truncation ---
     const largeEvs = await runTask("large page", true, `${base}/large`);
-    const largeAssts = largeEvs.filter(e => e.kind === "assistant_end");
-    const largeResult = largeAssts.map(e => e.content).join("");
+    const largeResult = answerOf(largeEvs);
     check(largeResult.includes("large_page_truncated=true"), "truncation: large page triggers truncation and maintains valid json (got " + largeResult + ")");
     check(largeResult.includes("elements=true"), "truncation: large page keeps array items (got " + largeResult + ")");
 
