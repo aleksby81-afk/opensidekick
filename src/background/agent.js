@@ -607,54 +607,79 @@ function pushToolResult(conversation, call, result) {
 
 // Keep tool results from blowing up the context window without breaking JSON.
 export function truncateForModel(result) {
-  let s = JSON.stringify(result);
-  if (s.length <= 12000) return result;
-
-  // Clone the object to avoid mutating the caller's copy.
-  let safe = null;
+  const LIMIT = 12000;
+  const NOTE = "result truncated to fit context";
+  let source;
   try {
-    safe = JSON.parse(s);
+    source = JSON.stringify(result);
   } catch {
-    return { ok: result.ok, note: "result truncated", preview: s.slice(0, 12000) };
+    return { ok: false, error: "Tool result could not be serialized", _note: NOTE };
   }
+  if (typeof source !== "string") {
+    return { ok: false, error: "Tool result could not be serialized", _note: NOTE };
+  }
+  if (source.length <= LIMIT) return result;
 
-  let truncated = false;
-  // Truncate the largest arrays until the JSON representation fits in 12000 chars.
-  while (true) {
-    s = JSON.stringify(safe);
-    if (s.length <= 12000) break;
+  // Work on a JSON copy, preserving the original tool result.
+  let safe = JSON.parse(source);
+  if (safe === null || typeof safe !== "object" || Array.isArray(safe)) {
+    safe = { result: safe };
+  }
+  safe._note = NOTE;
 
-    // Find the largest array property.
-    let maxArrKey = null;
-    let maxArrLen = 0;
-    for (const [key, value] of Object.entries(safe)) {
-      if (Array.isArray(value) && value.length > maxArrLen) {
-        maxArrLen = value.length;
-        maxArrKey = key;
+  // Shorten the largest contributor while retaining the beginning of arrays,
+  // including browser element refs that remain valid for the last read_page.
+  for (let attempt = 0; attempt < 1024; attempt++) {
+    if (JSON.stringify(safe).length <= LIMIT) return safe;
+
+    let candidate = null;
+    let singleton = null;
+    const scan = (value) => {
+      if (!value || typeof value !== "object") return;
+      for (const [key, child] of Object.entries(value)) {
+        if (key === "_note") continue;
+        if (Array.isArray(child)) {
+          if (child.length > 1) {
+            const saved = Math.floor(JSON.stringify(child).length / 2);
+            if (!candidate || saved > candidate.saved) {
+              candidate = { kind: "array", parent: value, key, saved };
+            }
+          } else if (child.length === 1 && singleton === null) {
+            singleton = { parent: value, key };
+          }
+          for (const entry of child) scan(entry);
+        } else if (child && typeof child === "object") {
+          scan(child);
+        } else if (typeof child === "string" && child.length > 0) {
+          const saved = Math.ceil(child.length / 2);
+          if (!candidate || saved > candidate.saved) {
+            candidate = { kind: "string", parent: value, key, saved };
+          }
+        }
       }
-    }
+    };
+    scan(safe);
 
-    // If there's an array to shorten, chop it in half.
-    if (maxArrKey && maxArrLen > 0) {
-      safe[maxArrKey] = safe[maxArrKey].slice(0, Math.floor(maxArrLen / 2));
-      truncated = true;
-    } else {
-      // If no array to shorten or it's still too big with no arrays left, fall back.
-      if (typeof safe.text === "string" && safe.text.length > 500) {
-        safe.text = safe.text.slice(0, safe.text.length - 500);
-        truncated = true;
-      } else {
-        return { ok: result.ok, note: "result truncated", preview: s.slice(0, 12000) };
-      }
+    if (candidate) {
+      const { parent, key } = candidate;
+      const original = parent[key];
+      parent[key] = original.slice(0, Math.floor(original.length / 2));
+      continue;
     }
+    if (singleton) {
+      singleton.parent[singleton.key] = [];
+      continue;
+    }
+    break;
   }
 
-  if (truncated) {
-    // Add a note but maintain the JSON structure so the model can parse it.
-    safe._note = "result truncated to fit context";
-  }
-
-  return safe;
+  // Key-heavy results may be impossible to shorten while retaining their keys.
+  // Return a small, valid object rather than a broken serialized JSON preview.
+  return {
+    ok: safe.ok === false ? false : true,
+    error: "Tool result exceeded context limit",
+    _note: NOTE,
+  };
 }
 
 function summarizeResult(name, r) {

@@ -1384,6 +1384,9 @@ async function main() {
     check(largeResult.includes("large_page_truncated=true"), "truncation: large page triggers truncation and maintains valid json (got " + largeResult + ")");
     check(largeResult.includes("elements=true"), "truncation: large page keeps array items (got " + largeResult + ")");
 
+    // Restore the ordinary search page so subsequent regression checks are isolated.
+    await testPage.goto(`${base}/page`, { waitUntil: "load" });
+
     await runTask("The magic word is plum. Acknowledge.", true);
     const persisted = await optPage.evaluate(async () => {
       const raw = await chrome.storage.session.get("opensidekick.conversation.v1");
