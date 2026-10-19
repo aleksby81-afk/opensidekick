@@ -605,6 +605,8 @@ function pushToolResult(conversation, call, result) {
   });
 }
 
+const PRESERVED_KEYS = new Set(["href", "url", "ref", "name"]);
+
 // Keep tool results from blowing up the context window without breaking JSON.
 export function truncateForModel(result) {
   const LIMIT = 12000;
@@ -651,6 +653,7 @@ export function truncateForModel(result) {
         } else if (child && typeof child === "object") {
           scan(child);
         } else if (typeof child === "string" && child.length > 0) {
+          if (PRESERVED_KEYS.has(key)) continue;
           const saved = Math.ceil(child.length / 2);
           if (!candidate || saved > candidate.saved) {
             candidate = { kind: "string", parent: value, key, saved };
