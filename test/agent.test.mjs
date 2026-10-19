@@ -72,4 +72,21 @@ const invalid = truncateForModel(circular);
 assert.equal(invalid.ok,false);
 assert.ok(JSON.stringify(invalid).length < 12000);
 
+// Ensure URL strings, hrefs, and refs are preserved
+const preservedFields = verifyLarge({
+  ok: true,
+  elements: [{
+    ref: 1234,
+    url: "https://example.com/a-very-long-url-that-must-be-preserved-" + "A".repeat(500),
+    href: "https://example.com/a-very-long-href-that-must-be-preserved-" + "A".repeat(500),
+    name: "A preserved name string that must not be truncated-" + "B".repeat(500),
+    description: "A description that should be truncated to save space-" + "C".repeat(15000)
+  }]
+});
+assert.ok(preservedFields.elements[0].url.includes("A".repeat(500)), "url is preserved");
+assert.ok(preservedFields.elements[0].href.includes("A".repeat(500)), "href is preserved");
+assert.ok(preservedFields.elements[0].name.includes("B".repeat(500)), "name is preserved");
+assert.equal(preservedFields.elements[0].ref, 1234, "ref is preserved");
+assert.ok(preservedFields.elements[0].description.length < 15000, "other fields are truncated");
+
 console.log("ALL AGENT HARDENING TESTS PASSED");
