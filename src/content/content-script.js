@@ -583,9 +583,18 @@
   function shortUrl(href) {
     try {
       const u = new URL(href);
-      return (u.pathname + u.search).slice(0, 80) || u.origin;
+      // Avito listing context is tracking metadata; keep the complete item
+      // pathname (including the numeric ID) and any other query parameters.
+      if (
+        (u.hostname === "avito.ru" || u.hostname.endsWith(".avito.ru")) &&
+        /_\d{6,}\/?$/.test(u.pathname)
+      ) {
+        u.searchParams.delete("context");
+      }
+      return u.href;
     } catch {
-      return href.slice(0, 80);
+      // Do not invent or silently truncate an unparseable link.
+      return href;
     }
   }
 })();
