@@ -76,6 +76,24 @@ const INJECTED_PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>N
 const SECOND_PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Other Site</title></head>
 <body><h1>Other Site</h1></body></html>`;
 
+// A page with a large number of elements to trigger truncation.
+// read_page caps at 200 elements. We add 200 links with long hrefs and long text
+// so the JSON payload naturally exceeds 12000 chars.
+const LARGE_PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Large Page</title></head>
+<body>
+  <h1>Large Page</h1>
+  <div id="container"></div>
+  <script>
+    const c = document.getElementById('container');
+    for (let i = 0; i < 200; i++) {
+      const a = document.createElement('a');
+      a.href = "https://example.com/some/very/long/path/that/takes/up/space/to/hit/the/eighty/char/limit/" + i;
+      a.textContent = 'Link ' + i + ' with some extra text to make sure the element name is long enough to bloat the JSON size substantially and reach our limit.';
+      c.appendChild(a);
+    }
+  </script>
+</body></html>`;
+
 let BASE1 = ""; // first server base URL, set in main()
 let BASE2 = ""; // second server (different origin), set in main()
 
@@ -178,6 +196,17 @@ function decide(messages) {
     return { kind: "text", text: "mcp_answer: " + (wr ? wr.result : "?") };
   }
 
+  // Large read_page result: test that truncation outputs valid JSON and the model
+  // can proceed.
+  if (/large page/.test(firstUser)) {
+    if (n === 0) return { kind: "tool", name: "read_page", args: {} };
+    // After the first read_page, verify if it's truncated JSON and valid.
+    const isTruncated = parsed.some(p => p._note === "result truncated to fit context" || p.note === "result truncated");
+    const elementsExist = parsed.some(p => Array.isArray(p.elements) && p.elements.length > 0);
+    if (n === 1) return { kind: "tool", name: "click_element", args: { ref: 1 } };
+    if (n === 2) return { kind: "tool", name: "finish", args: { summary: `large_page_truncated=${isTruncated} elements=${elementsExist}` } };
+  }
+
   // Injection flag (B): navigate to a hostile page and read it.
   if (/suspicious|injection|hostile|notice page/.test(firstUser)) {
     if (n === 0) return { kind: "tool", name: "navigate", args: { url: `${BASE1}/injected` } };
@@ -270,6 +299,9 @@ function startServer() {
     if (req.url === "/injected") {
       res.writeHead(200, { "content-type": "text/html" });
       return res.end(INJECTED_PAGE);
+    } else if (req.url === "/large") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end(LARGE_PAGE);
     }
     if (req.url === "/img.png") {
       res.writeHead(200, { "content-type": "image/png", "access-control-allow-origin": "*" });
@@ -1330,8 +1362,11 @@ async function main() {
 
     // --- Context retention across service-worker restarts ---
     // MV3 kills the idle worker between prompts; the conversation must survive.
-    const runTask = async (task, newChat) => {
+    const runTask = async (task, newChat, pageUrl = null) => {
       await optPage.evaluate(() => (window.__events = []));
+      if (pageUrl) {
+        await testPage.goto(pageUrl, { waitUntil: "load" });
+      }
       await testPage.bringToFront();
       await optPage.evaluate(([rt, t, nc]) => chrome.runtime.sendMessage({ type: rt, task: t, newChat: nc }), [MSG.RUN_TASK, task, newChat]);
       for (let i = 0; i < 120; i++) {
@@ -1341,6 +1376,13 @@ async function main() {
       }
       return optPage.evaluate(() => window.__events || []);
     };
+
+    // --- Test large page truncation ---
+    const largeEvs = await runTask("large page", true, `${base}/large`);
+    const largeAssts = largeEvs.filter(e => e.kind === "assistant_end");
+    const largeResult = largeAssts.map(e => e.content).join("");
+    check(largeResult.includes("large_page_truncated=true"), "truncation: large page triggers truncation and maintains valid json (got " + largeResult + ")");
+    check(largeResult.includes("elements=true"), "truncation: large page keeps array items (got " + largeResult + ")");
 
     await runTask("The magic word is plum. Acknowledge.", true);
     const persisted = await optPage.evaluate(async () => {
